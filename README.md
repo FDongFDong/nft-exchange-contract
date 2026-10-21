@@ -68,27 +68,28 @@ sequenceDiagram
 CEI 순서대로 세 단계로 나뉩니다. 먼저 검증하고, 체결 상태(`filled = true`)를 기록한 다음, 마지막에 토큰과 NFT 컨트랙트를 호출합니다. 어느 칸에서든 조건이 맞지 않으면 트랜잭션 전체가 되돌아갑니다.
 
 ```mermaid
-flowchart LR
-    subgraph C["1 검증"]
-        direction TB
-        C1["실행 조건<br/>거래 중지 아님<br/>수수료율 100% 이하<br/>executor 호출<br/>체인 ID 일치"]
-        C2["주문 기한 확인"]
-        C3["nonce 소진<br/>minNonce 이상<br/>처음 쓰는 nonce"]
-        C4["주문 서명 확인<br/>체결·취소 이력 없음<br/>EOA는 ECDSA<br/>컨트랙트는 ERC-1271"]
+%%{init: {"flowchart": {"wrappingWidth": 400}}}%%
+flowchart TD
+    subgraph C["① 검증"]
+        direction LR
+        C1["실행 조건<br/>거래 중지 아님<br/>수수료율 ≤ 100%<br/>executor 호출<br/>체인 ID 일치"]
+        C2["주문 기한"]
+        C3["nonce 소진<br/>minNonce 이상<br/>처음 쓰는 값"]
+        C4["판매자 서명<br/>체결·취소 이력 없음<br/>EOA: ECDSA<br/>컨트랙트: ERC-1271"]
         C1 --> C2 --> C3 --> C4
     end
-    subgraph E["2 기록"]
+    subgraph E["② 기록"]
         E1["filled = true"]
     end
-    subgraph I["3 외부 호출"]
-        direction TB
-        I1["거래 조건 확인<br/>허용된 NFT<br/>가격 0 아님<br/>판매자 소유<br/>전송 권한 있음"]
-        I2["Permit 처리<br/>금액·기한 확인<br/>permit 실행<br/>allowance·잔액 재확인"]
-        I3["대금·수수료 전송<br/>전후 잔액 비교<br/>FoT 차단"]
-        I4["NFT 전송<br/>OrderFilled 기록"]
+    subgraph I["③ 외부 호출"]
+        direction LR
+        I1["거래 조건<br/>허용된 NFT<br/>가격 0 아님<br/>판매자 소유<br/>전송 권한"]
+        I2["Permit<br/>금액·기한 확인<br/>permit 실행<br/>allowance·잔액 재확인"]
+        I3["대금·수수료 전송<br/>전후 잔액 비교<br/>(FoT 차단)"]
+        I4["NFT 전송<br/>OrderFilled"]
         I1 --> I2 --> I3 --> I4
     end
-    C4 --> E1 --> I1
+    C --> E --> I
 ```
 
 ## 보안 장치
