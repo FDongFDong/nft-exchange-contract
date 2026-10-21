@@ -98,10 +98,10 @@ flowchart TD
 | 재진입 | OpenZeppelin `ReentrancyGuard`를 걸고, 체결 상태를 외부 호출 전에 기록 (CEI) |
 | 같은 주문의 이중 체결 | 판매자별 `nonceUsed`로 한 번 쓴 nonce를 막고, 주문 해시별 `filled`·`canceled`도 함께 확인 |
 | 유출된 옛 주문 | 판매자가 `cancelAllUpTo`로 `minNonce`를 올리면 그보다 낮은 nonce의 주문은 한꺼번에 무효 |
-| 다른 체인에서 서명 재사용 | 배포할 때 Chain ID를 저장하고 호출마다 비교 (`BadChain`) |
+| 다른 체인·다른 컨트랙트에서 서명 재사용 | 주문 서명의 EIP-712 도메인에 체인 ID와 컨트랙트 주소가 들어가 다른 곳에서는 검증되지 않음. 여기에 더해 배포 시 저장한 Chain ID를 호출마다 비교 (`BadChain`) |
 | 수수료를 떼는 토큰(FoT) | 전송 전후 잔액을 비교해 1이라도 모자라면 되돌림 (`FoTDetected`) |
 | Permit만 믿는 위험 | `permit` 뒤에 allowance와 잔액을 다시 확인 |
-| 컨트랙트 지갑 판매자 | 판매자가 컨트랙트면 ERC-1271 `isValidSignature`로 검증 |
+| 컨트랙트 지갑 판매자 | 판매자가 컨트랙트면 ERC-1271 `isValidSignature`로 검증 (아래 "알려진 한계" 참고) |
 | 아무 NFT나 거래됨 | `allowedNft` 화이트리스트에 등록된 컬렉션만 거래 |
 | 소유권 실수 이전 | `Ownable2Step`이라 새 소유자가 수락해야 넘어감 |
 | 운영 중 사고 | 거래와 취소를 따로 멈추는 스위치 (`setTradingPaused`, `setCancelPaused`) |
@@ -123,6 +123,29 @@ flowchart TD
 
 - **`transferWithPermit`**: NFT 거래가 아니어도 Permit 서명으로 ERC-20을 옮깁니다. 서버가 사용자 대신 보상을 지급하거나 비용을 정산할 때 씁니다. FoT 검사도 똑같이 거칩니다.
 - **수수료**: 호출할 때 `customFeeBps`(만분율)로 정하고 `feeTo` 주소로 보냅니다. 10,000(100%)을 넘으면 거부합니다.
+
+## 신뢰 모델
+
+`fill`과 `transferWithPermit`은 owner와 executor만 호출할 수 있습니다. 사용자는 서명만 하고 나머지는 서버가 정하므로, 이 컨트랙트는 executor를 신뢰한다는 전제 위에 서 있습니다.
+
+| 서명에 담기는 것 | 서명에 담기지 않아 executor가 정하는 것 |
+|---|---|
+| 판매 주문: 판매자, NFT, tokenId, 가격, nonce, 기한 | 수수료율 `customFeeBps` (0 ~ 100%) |
+| 구매자 Permit: 지출 한도(= 판매가), 기한 | 어떤 주문에 그 Permit을 쓸지, `buyer` 주소 |
+
+그래서 executor 키가 유출되면 두 가지가 가능합니다.
+- 판매자 대금에서 수수료를 최대 100%까지 떼어 갈 수 있습니다.
+- 구매자의 Permit을 가격이 같은 다른 NFT 구매에 쓸 수 있습니다.
+
+운영에서는 executor 키를 서버 한 곳에서만 관리하고, 문제가 생기면 `setExecutor`로 권한을 회수한 뒤 `setTradingPaused`로 거래를 멈추는 절차를 전제로 했습니다.
+
+## 알려진 한계
+
+배포된 소스를 그대로 올렸기 때문에, 이후에 발견한 문제도 코드에 그대로 남아 있습니다.
+
+- **ERC-1271 반환값 길이 검사**: `_isValidSig1271`이 `ret.length == 4`로 검사합니다. 그런데 ABI 인코딩된 `bytes4` 반환값은 32바이트로 패딩되므로, 표준대로 구현한 컨트랙트 지갑은 이 검사를 통과하지 못합니다. 결과적으로 이 버전에서는 컨트랙트 지갑 판매자의 주문이 체결되지 않습니다. 이 문제는 이후 만든 투표 컨트랙트에서 `ret.length >= 32`로 고치고, Mock 지갑으로 성공·실패 테스트를 추가했습니다.
+- **Permit 선점에 약함**: `permit`을 그대로 호출하기 때문에, 누군가 같은 Permit 서명을 먼저 토큰 컨트랙트에 제출하면 nonce가 소진되어 `fill` 전체가 되돌아갑니다. 자산을 잃는 문제는 아니지만 거래를 방해할 수 있습니다. `permit`을 `try/catch`로 감싸고, 바로 뒤에 있는 allowance 확인에 맡기는 편이 낫습니다.
+- **수수료가 서명에 없음**: 위 신뢰 모델처럼, 판매자가 동의한 수수료 상한을 주문 서명에 넣으면 executor 의존을 줄일 수 있습니다.
 
 ## 테스트
 
